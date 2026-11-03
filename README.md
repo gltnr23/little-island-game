@@ -36,3 +36,10 @@ src/
   scenes/GameScene.ts  월드, 플레이어 이동, 충돌, 수집
   scenes/UIScene.ts    HUD, 조이스틱, 안내 문구
 ```
+
+## 배포 (GitHub Pages)
+
+`main` 브랜치에 push하면 `.github/workflows/deploy.yml`이 자동으로 빌드하고 배포합니다.
+배포 주소: https://gltnr23.github.io/little-island-game/
+
+Vite `base`가 `/little-island-game/`라서 로컬 개발 서버 주소도 `http://localhost:5173/little-island-game/` 입니다.
