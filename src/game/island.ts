@@ -126,10 +126,20 @@ export function generateIsland(seed = 'little-island', size = 18): IslandData {
   place(grass, 'bush', 6);
   place(sand, 'rock', 5);
 
+  // Fill the plateau into a solid 3x3 block so it has no walkable notch.
+  // Done after placing props so the rest of the island (and saved games) keep the same layout.
+  for (let oy = -3; oy <= -1; oy++)
+    for (let ox = -1; ox <= 1; ox++) {
+      const hx = Math.floor(c) + ox;
+      const hy = Math.floor(c) + oy;
+      if (tiles[hy]?.[hx] !== undefined && tiles[hy][hx] !== Tile.Water) tiles[hy][hx] = Tile.Hill;
+    }
+  for (let i = props.length - 1; i >= 0; i--) if (tiles[props[i].y][props[i].x] === Tile.Hill) props.splice(i, 1);
+
   const shells: { x: number; y: number }[] = [];
   for (const [x, y] of sand) {
     if (shells.length >= 8) break;
-    if (occupied.has(key(x, y))) continue;
+    if (occupied.has(key(x, y)) || tiles[y][x] !== Tile.Sand) continue;
     occupied.add(key(x, y));
     shells.push({ x: x + 0.5, y: y + 0.5 });
   }

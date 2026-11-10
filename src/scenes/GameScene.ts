@@ -12,6 +12,8 @@ import type { UIScene } from './UIScene';
 const PLAYER_SPEED = 230; // screen px / second
 const PLAYER_RADIUS = 0.22; // grid units
 const INTERACT_RANGE = 1.3; // grid units from the target tile's centre
+/** Collision radius (grid units) of props; bushes can be walked through. */
+const PROP_RADIUS: Partial<Record<Prop['kind'], number>> = { tree: 0.22, rock: 0.24 };
 
 // Draw order above the world: night tint, then lights, then markers/popups.
 const OVERLAY_DEPTH = 900000;
@@ -57,6 +59,7 @@ export interface Prompt {
 export class GameScene extends Phaser.Scene {
   private island!: IslandData;
   private blocked!: boolean[][];
+  private circles: { x: number; y: number; r: number }[] = [];
   private player!: Phaser.GameObjects.Container;
   private playerSprite!: Phaser.GameObjects.Image;
   private pos = new Phaser.Math.Vector2();
@@ -127,7 +130,12 @@ export class GameScene extends Phaser.Scene {
   private buildBlockedMap(): void {
     const { tiles, props, sites } = this.island;
     this.blocked = tiles.map((row) => row.map((t) => t === Tile.Water || t === Tile.Hill));
-    for (const prop of props) if (prop.kind !== 'bush') this.blocked[prop.y][prop.x] = true;
+    // Trees and rocks are round obstacles (not whole tiles) so the player slides around them.
+    this.circles = [];
+    for (const prop of props) {
+      const r = PROP_RADIUS[prop.kind];
+      if (r) this.circles.push({ x: prop.x + 0.5, y: prop.y + 0.5, r });
+    }
     for (const site of sites) if (SITES[site.id].blocks) this.blocked[site.y][site.x] = true;
   }
 
@@ -453,9 +461,7 @@ export class GameScene extends Phaser.Scene {
 
     if (input.lengthSq() > 0) {
       const step = screenVecToGrid(input.x * PLAYER_SPEED * dt, input.y * PLAYER_SPEED * dt);
-      // Move axis-by-axis so the player slides along obstacles.
-      if (this.canStand(this.pos.x + step.x, this.pos.y)) this.pos.x += step.x;
-      if (this.canStand(this.pos.x, this.pos.y + step.y)) this.pos.y += step.y;
+      this.moveBy(step.x, step.y);
 
       if (Math.abs(input.x) > 0.15) this.playerSprite.setFlipX(input.x < 0);
       this.playerSprite.setTexture(input.y < -0.3 ? 'player-back' : 'player-front');
@@ -492,16 +498,83 @@ export class GameScene extends Phaser.Scene {
     return v;
   }
 
-  private canStand(gx: number, gy: number): boolean {
+  /**
+   * Moves the player (a circle) and pushes it out of blocked tiles and round obstacles
+   * along the contact normal, so it glides around corners instead of stopping dead.
+   */
+  private moveBy(dx: number, dy: number): void {
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return;
+    // Try the intended direction first, then progressively angled ones, and keep whichever
+    // gets furthest forward. This steers around an obstacle hit head-on instead of stalling.
+    let best: { x: number; y: number } | null = null;
+    let bestScore = 0;
+    for (const deg of [0, 30, -30, 60, -60, 85, -85]) {
+      const a = Phaser.Math.DegToRad(deg);
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      const p = this.resolve(this.pos.x + dx * cos - dy * sin, this.pos.y + dx * sin + dy * cos);
+      if (!p || !this.canStand(p.x, p.y)) continue;
+      const score = ((p.x - this.pos.x) * dx + (p.y - this.pos.y) * dy) / len; // forward progress
+      if (score > bestScore + 1e-4) {
+        best = p;
+        bestScore = score;
+      }
+      if (deg === 0 && score > len * 0.6) break; // moving freely enough already
+    }
+    if (best) {
+      this.pos.set(best.x, best.y);
+      return;
+    }
+    // Fallback: axis-by-axis movement.
+    if (this.canStand(this.pos.x + dx, this.pos.y)) this.pos.x += dx;
+    if (this.canStand(this.pos.x, this.pos.y + dy)) this.pos.y += dy;
+  }
+
+  private resolve(x: number, y: number): { x: number; y: number } | null {
     const r = PLAYER_RADIUS;
-    const pts: [number, number][] = [
-      [gx - r, gy - r], [gx + r, gy - r], [gx - r, gy + r], [gx + r, gy + r],
-    ];
-    return pts.every(([x, y]) => {
-      const tx = Math.floor(x);
-      const ty = Math.floor(y);
-      return this.blocked[ty]?.[tx] === false;
-    });
+    for (let iter = 0; iter < 4; iter++) {
+      let moved = false;
+      const push = (cx: number, cy: number, min: number): boolean => {
+        const ddx = x - cx;
+        const ddy = y - cy;
+        const d = Math.hypot(ddx, ddy);
+        if (d >= min) return true;
+        if (d < 1e-6) return false; // centre inside an obstacle: no sensible push direction
+        x += (ddx / d) * (min - d);
+        y += (ddy / d) * (min - d);
+        moved = true;
+        return true;
+      };
+      const fx = Math.floor(x);
+      const fy = Math.floor(y);
+      for (let ty = fy - 1; ty <= fy + 1; ty++)
+        for (let tx = fx - 1; tx <= fx + 1; tx++) {
+          if (!this.isBlockedTile(tx, ty)) continue;
+          if (!push(Phaser.Math.Clamp(x, tx, tx + 1), Phaser.Math.Clamp(y, ty, ty + 1), r)) return null;
+        }
+      for (const c of this.circles) if (!push(c.x, c.y, r + c.r)) return null;
+      if (!moved) break;
+    }
+    return { x, y };
+  }
+
+  private isBlockedTile(tx: number, ty: number): boolean {
+    return this.blocked[ty]?.[tx] !== false;
+  }
+
+  private canStand(gx: number, gy: number): boolean {
+    const r = PLAYER_RADIUS - 1e-4;
+    const fx = Math.floor(gx);
+    const fy = Math.floor(gy);
+    for (let ty = fy - 1; ty <= fy + 1; ty++)
+      for (let tx = fx - 1; tx <= fx + 1; tx++) {
+        if (!this.isBlockedTile(tx, ty)) continue;
+        const cx = Phaser.Math.Clamp(gx, tx, tx + 1);
+        const cy = Phaser.Math.Clamp(gy, ty, ty + 1);
+        if (Math.hypot(gx - cx, gy - cy) < r) return false;
+      }
+    return this.circles.every((c) => Math.hypot(gx - c.x, gy - c.y) >= r + c.r);
   }
 
   private syncPlayer(): void {
