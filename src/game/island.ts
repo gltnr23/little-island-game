@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { SiteId } from './sites';
 
 export enum Tile {
   Water = 0,
@@ -15,10 +16,19 @@ export interface Prop {
   y: number;
 }
 
+export interface SiteSpot {
+  id: SiteId;
+  x: number;
+  y: number;
+  /** Dock only: the water tiles the planks cover once restored. */
+  planks: { x: number; y: number }[];
+}
+
 export interface IslandData {
   size: number;
   tiles: Tile[][]; // tiles[y][x]
   props: Prop[];
+  sites: SiteSpot[];
   shells: { x: number; y: number }[];
   spawn: { x: number; y: number };
 }
@@ -69,6 +79,36 @@ export function generateIsland(seed = 'little-island', size = 18): IslandData {
     return rng.shuffle(out);
   };
 
+  // Restoration sites are reserved before props so trees never cover them.
+  const nearest = (type: Tile, tx: number, ty: number, ok: (x: number, y: number) => boolean = () => true) => {
+    let best: [number, number] | null = null;
+    let bestD = Infinity;
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        if (tiles[y][x] !== type || nearSpawn(x, y) || occupied.has(key(x, y)) || !ok(x, y)) continue;
+        const d = (x - tx) ** 2 + (y - ty) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = [x, y];
+        }
+      }
+    return best;
+  };
+  const sites: SiteSpot[] = [];
+  const addSite = (id: SiteId, cell: [number, number] | null, planks: { x: number; y: number }[] = []) => {
+    if (!cell) return;
+    occupied.add(key(cell[0], cell[1]));
+    sites.push({ id, x: cell[0], y: cell[1], planks });
+  };
+  const ci = Math.floor(c);
+  addSite('campfire', nearest(Tile.Grass, ci + 2, ci + 2));
+  addSite('garden', nearest(Tile.Grass, ci - 3, ci + 1));
+  addSite('hut', nearest(Tile.Grass, ci + 3, ci - 3));
+  // Dock: a sand tile on the near (screen-bottom) shore with two water tiles in front of it.
+  const water = (x: number, y: number) => tiles[y]?.[x] === Tile.Water;
+  const dock = nearest(Tile.Sand, ci + 1, size, (x, y) => water(x, y + 1) && water(x, y + 2));
+  if (dock) addSite('dock', dock, [{ x: dock[0], y: dock[1] + 1 }, { x: dock[0], y: dock[1] + 2 }]);
+
   const props: Prop[] = [];
   const place = (cells: [number, number][], kind: PropKind, count: number) => {
     for (const [x, y] of cells) {
@@ -94,5 +134,5 @@ export function generateIsland(seed = 'little-island', size = 18): IslandData {
     shells.push({ x: x + 0.5, y: y + 0.5 });
   }
 
-  return { size, tiles, props, shells, spawn };
+  return { size, tiles, props, sites, shells, spawn };
 }

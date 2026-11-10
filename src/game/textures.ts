@@ -70,19 +70,22 @@ export function createTextures(scene: Phaser.Scene): void {
   g.fillCircle(30, 26, 7);
   g.generateTexture('tree', 80, 126);
 
-  // Bush
-  g.clear();
-  g.fillStyle(0x000000, 0.16);
-  g.fillEllipse(28, 38, 44, 12);
-  g.fillStyle(0x3f9a4f);
-  g.fillCircle(18, 26, 13);
-  g.fillCircle(38, 26, 13);
-  g.fillStyle(0x58b960);
-  g.fillCircle(28, 20, 15);
-  g.fillStyle(0xff8fa3);
-  g.fillCircle(22, 16, 3);
-  g.fillCircle(36, 22, 3);
-  g.generateTexture('bush', 56, 44);
+  // Bush (with berries, and picked-clean variant)
+  for (const [key, berries] of [['bush', true], ['bush-empty', false]] as const) {
+    g.clear();
+    g.fillStyle(0x000000, 0.16);
+    g.fillEllipse(28, 38, 44, 12);
+    g.fillStyle(0x3f9a4f);
+    g.fillCircle(18, 26, 13);
+    g.fillCircle(38, 26, 13);
+    g.fillStyle(0x58b960);
+    g.fillCircle(28, 20, 15);
+    if (berries) {
+      g.fillStyle(0xe8445f);
+      for (const [bx, by] of [[22, 16], [36, 22], [16, 28], [30, 28], [40, 14]]) g.fillCircle(bx, by, 3.2);
+    }
+    g.generateTexture(key, 56, 44);
+  }
 
   // Rock
   g.clear();

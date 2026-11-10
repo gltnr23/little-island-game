@@ -31,6 +31,8 @@ export class Joystick {
 
   private onDown(pointer: Phaser.Input.Pointer): void {
     if (this.pointerId !== null || pointer.y < this.activeTop) return;
+    // Touches that start on a button (e.g. the action button) don't move the player.
+    if (this.scene.input.hitTestPointer(pointer).length > 0) return;
     this.pointerId = pointer.id;
     this.base.setPosition(pointer.x, pointer.y).setAlpha(0.8);
     this.knob.setPosition(pointer.x, pointer.y).setAlpha(1);
